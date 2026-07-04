@@ -170,7 +170,7 @@ function viewTraining() {
       <div class="empty">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6.5 6.5l11 11M21 21l-1-1M3 3l1 1M18 22l4-4M2 6l4-4M7 17l-5 5M17 7l5-5"/></svg>
         <h3>Bereit fürs Training?</h3>
-        <p class="muted small">Starte eine neue Einheit und trage Sätze, Wiederholungen und Zusatzgewicht ein.</p>
+        <p class="muted small">Starte eine neue Einheit${store.db.exercises.some((e) => e.favorite) ? ' – deine Favoriten werden automatisch geladen' : ' und trage Sätze, Wiederholungen und Gewicht ein'}.</p>
       </div>
       <button class="btn btn-primary" data-action="start-session">Neues Training starten</button>
       ${last ? `<p class="muted small" style="text-align:center;margin-top:18px">Letztes Training: ${esc(fmtDateShort(last.dateISO))} · ${last.entries.length} Übung(en)</p>` : ''}
@@ -204,6 +204,7 @@ function exerciseBlock(entry, ei) {
     : (sug && sug.prevReps ? `<div class="ex-hint">Letztes Mal ${sug.prevReps} WH im 1. Satz · Gewicht halten</div>` : '');
 
   const pr = prsForExercise(ex.id);
+  const entryWeight = entry.sets.length ? (entry.sets[0].weight ?? '') : '';
   const rows = entry.sets.map((set, si) => {
     const done = set.done ? ' done' : '';
     const r = num(set.reps), w = num(set.weight);
@@ -218,8 +219,6 @@ function exerciseBlock(entry, ei) {
         <div class="set-idx">${si + 1}</div>
         <input class="set-input${done}" type="number" inputmode="numeric" min="0" placeholder="0"
                value="${set.reps ?? ''}" data-ei="${ei}" data-si="${si}" data-field="reps" aria-label="Wiederholungen">
-        <input class="set-input${done}" type="number" inputmode="decimal" min="0" step="0.5" placeholder="0"
-               value="${set.weight ?? ''}" data-ei="${ei}" data-si="${si}" data-field="weight" aria-label="Gewicht kg">
         ${bandCell}
         <button class="set-check${done}" data-action="toggle-set" data-ei="${ei}" data-si="${si}" aria-label="Satz erledigt">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
@@ -230,15 +229,27 @@ function exerciseBlock(entry, ei) {
   }).join('');
 
   return `
-    <div class="ex-block${withBand}" style="--x:0">
+    <div class="ex-block${withBand}">
       <div class="ex-head">
-        <div>
+        <div class="ex-head-main">
           <div class="ex-name">${esc(ex.name)}</div>
           ${hint}
         </div>
+        <div class="ex-move">
+          <button class="move-btn" data-action="move-exercise" data-ei="${ei}" data-dir="-1" aria-label="Nach oben">↑</button>
+          <button class="move-btn" data-action="move-exercise" data-ei="${ei}" data-dir="1" aria-label="Nach unten">↓</button>
+        </div>
+      </div>
+      <div class="ex-weight-bar">
+        <span class="ewb-label">Gewicht (alle Sätze)</span>
+        <div class="ewb-input">
+          <input class="set-input" type="number" inputmode="decimal" min="0" step="0.5" placeholder="0"
+                 value="${entryWeight}" data-entry-weight data-ei="${ei}" aria-label="Gewicht in kg für alle Sätze">
+          <span class="ewb-unit">kg</span>
+        </div>
       </div>
       <div class="set-head">
-        <div>#</div><div>WDH</div><div>KG</div>${ex.usesBands ? '<div>BAND</div>' : ''}<div></div>
+        <div>#</div><div>WDH</div>${ex.usesBands ? '<div>BAND</div>' : ''}<div></div>
       </div>
       ${rows}
       <div class="ex-actions">
@@ -429,17 +440,19 @@ function viewExercises() {
     if (ex.progression && ex.progression.enabled)
       tags.push(`<span class="li-tag">+${fmtWeight(ex.progression.stepKg)}kg @ ${ex.progression.triggerReps}WH</span>`);
     return `
-      <div class="list-item" data-action="edit-exercise" data-id="${ex.id}">
-        <div class="li-body">
+      <div class="list-item">
+        <button class="star-btn${ex.favorite ? ' on' : ''}" data-action="toggle-fav" data-id="${ex.id}" aria-label="Favorit">${ex.favorite ? '★' : '☆'}</button>
+        <div class="li-body" data-action="edit-exercise" data-id="${ex.id}">
           <div class="li-title">${esc(ex.name)}</div>
           <div class="li-sub">${tags.join('') || '<span class="muted">Keine Optionen</span>'}</div>
         </div>
-        <svg class="li-chevron" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+        <svg class="li-chevron" data-action="edit-exercise" data-id="${ex.id}" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
       </div>`;
   }).join('');
 
+  const favCount = list.filter((e) => e.favorite).length;
   return `
-    ${list.length ? `<div class="section-title">${list.length} Übung(en)</div>${items}` : `
+    ${list.length ? `<div class="section-title">${list.length} Übung(en)${favCount ? ` · ${favCount} Favorit${favCount === 1 ? '' : 'en'}` : ''}</div>${favCount ? '' : '<p class="muted small" style="margin:-4px 2px 12px">Tipp: Tippe den Stern, um Übungen als Favorit zu setzen – sie werden dann bei jedem neuen Training automatisch geladen.</p>'}${items}` : `
       <div class="empty">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M16 21h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
         <h3>Noch keine Übungen</h3>
@@ -480,6 +493,10 @@ function exerciseEditor(exId) {
       </div>
       <div class="card" style="margin:4px 0 14px">
         <div class="switch-row">
+          <div><div class="sw-label">★ Favorit</div><div class="sw-sub">Automatisch bei jedem neuen Training laden</div></div>
+          <label class="switch"><input type="checkbox" name="favorite" ${ex && ex.favorite ? 'checked' : ''}><span class="slider"></span></label>
+        </div>
+        <div class="switch-row">
           <div><div class="sw-label">Widerstandsbänder</div><div class="sw-sub">Band-Stufe 1–5 pro Satz erfassen</div></div>
           <label class="switch"><input type="checkbox" name="usesBands" ${ex && ex.usesBands ? 'checked' : ''}><span class="slider"></span></label>
         </div>
@@ -512,6 +529,7 @@ function saveExerciseFromForm(exId) {
     name,
     category: f.category.value.trim(),
     defaultSets: Math.min(12, Math.max(1, Math.round(num(f.defaultSets.value) || 3))),
+    favorite: f.favorite.checked,
     usesBands: f.usesBands.checked,
     progression: {
       enabled: f.progEnabled.checked,
@@ -656,9 +674,32 @@ const restTimer = {
 /* ============================================================
    Aktionen / Event-Delegation
    ============================================================ */
+function buildEntry(exId) {
+  const ex = exById(exId);
+  const sug = suggestWeight(exId);
+  const entry = { exerciseId: exId, sets: [], _sug: sug };
+  const nSets = Math.max(1, (ex.defaultSets ?? 3));
+  for (let k = 0; k < nSets; k++) {
+    entry.sets.push({ reps: '', weight: sug.weight || '', band: '', done: false });
+  }
+  return entry;
+}
+
 function newActiveSession() {
-  store.db.active = { id: uid(), dateISO: todayISO(), entries: [], notes: '' };
+  // Favoriten automatisch vorbereiten – in gespeicherter Reihenfolge (db.exercises).
+  const favs = store.db.exercises.filter((ex) => ex.favorite);
+  store.db.active = { id: uid(), dateISO: todayISO(), entries: favs.map((ex) => buildEntry(ex.id)), notes: '' };
   store.save();
+}
+
+// Übungs-Reihenfolge aus der aktuellen Session in db.exercises übernehmen
+// (nur die beteiligten Übungen, deren Positionen untereinander getauscht werden).
+function persistOrderFromEntries() {
+  const ids = store.db.active.entries.map((e) => e.exerciseId).filter((id) => exById(id));
+  const slots = [];
+  store.db.exercises.forEach((ex, i) => { if (ids.includes(ex.id)) slots.push(i); });
+  const ordered = ids.map((id) => exById(id));
+  slots.forEach((slot, k) => { store.db.exercises[slot] = ordered[k]; });
 }
 function addSetToEntry(entry, copyFrom) {
   const prev = copyFrom || entry.sets[entry.sets.length - 1] || {};
@@ -704,16 +745,25 @@ document.addEventListener('click', (e) => {
     case 'pick-exercise': {
       const id = t.dataset.id;
       if (!a.entries.some((en) => en.exerciseId === id)) {
-        const sug = suggestWeight(id);
-        const entry = { exerciseId: id, sets: [], _sug: sug };
-        const nSets = Math.max(1, (exById(id).defaultSets ?? 3));
-        for (let k = 0; k < nSets; k++) {
-          entry.sets.push({ reps: '', weight: sug.weight || '', band: '', done: false });
-        }
-        a.entries.push(entry);
+        a.entries.push(buildEntry(id));
         store.save();
       }
       closeModal(); render();
+      break;
+    }
+
+    case 'move-exercise': {
+      const ei = +t.dataset.ei, ni = ei + (+t.dataset.dir);
+      if (ni < 0 || ni >= a.entries.length) break;
+      [a.entries[ei], a.entries[ni]] = [a.entries[ni], a.entries[ei]];
+      persistOrderFromEntries();
+      store.save(); render();
+      break;
+    }
+
+    case 'toggle-fav': {
+      const ex = exById(t.dataset.id);
+      if (ex) { ex.favorite = !ex.favorite; store.save(); render(); }
       break;
     }
 
@@ -801,8 +851,16 @@ $('#settings-btn').addEventListener('click', () => { restTimer.unlock(); openSet
 
 // Eingaben in Sätze (Delegation über change/input)
 document.addEventListener('input', (e) => {
+  if (!store.db.active) return;
+  // Gewicht gilt für alle Sätze der Übung
+  const ew = e.target.closest('[data-entry-weight]');
+  if (ew) {
+    const en = store.db.active.entries[+ew.dataset.ei];
+    if (en) { en.sets.forEach((s) => { s.weight = ew.value; }); store.save(); }
+    return;
+  }
   const inp = e.target.closest('[data-field]');
-  if (!inp || !store.db.active) return;
+  if (!inp) return;
   const en = store.db.active.entries[+inp.dataset.ei];
   if (!en) return;
   const set = en.sets[+inp.dataset.si];

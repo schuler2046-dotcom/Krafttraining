@@ -347,15 +347,55 @@ select.input {
 
 .set-head, .set-row {
   display: grid;
-  grid-template-columns: 26px 1fr 1fr 46px;
+  grid-template-columns: 26px 1fr 46px;
   gap: 8px;
   align-items: center;
   padding: 6px 16px;
 }
 .ex-block.with-band .set-head,
 .ex-block.with-band .set-row {
-  grid-template-columns: 26px 1fr 1fr 66px 46px;
+  grid-template-columns: 26px 1fr 66px 46px;
 }
+
+/* Gewicht je Übung (einmal für alle Sätze) */
+.ex-weight-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 16px 10px;
+}
+.ewb-label { font-size: 13px; color: var(--muted); font-weight: 600; }
+.ewb-input { display: flex; align-items: center; gap: 8px; }
+.ewb-input input { width: 92px; text-align: center; }
+.ewb-unit { color: var(--muted); font-weight: 700; font-size: 14px; }
+
+/* Übung verschieben */
+.ex-head-main { min-width: 0; }
+.ex-move { display: flex; gap: 6px; flex-shrink: 0; }
+.move-btn {
+  width: 34px; height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 15px;
+  display: grid; place-items: center;
+}
+.move-btn:active { background: var(--surface-3); }
+
+/* Favoriten-Stern in der Übungsliste */
+.star-btn {
+  width: 36px; height: 36px;
+  border: none;
+  background: transparent;
+  color: var(--muted-2);
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+  display: grid; place-items: center;
+}
+.star-btn.on { color: #f6c945; }
 .set-head {
   font-size: 11px;
   text-transform: uppercase;
