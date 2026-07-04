@@ -424,6 +424,7 @@ function viewExercises() {
   const items = list.map((ex) => {
     const tags = [];
     if (ex.category) tags.push(`<span class="li-tag">${esc(ex.category)}</span>`);
+    tags.push(`<span class="li-tag">${ex.defaultSets ?? 3} Sätze</span>`);
     if (ex.usesBands) tags.push(`<span class="li-tag band">Bänder</span>`);
     if (ex.progression && ex.progression.enabled)
       tags.push(`<span class="li-tag">+${fmtWeight(ex.progression.stepKg)}kg @ ${ex.progression.triggerReps}WH</span>`);
@@ -460,6 +461,7 @@ function closeModal() { $('#modal-root').innerHTML = ''; }
 function exerciseEditor(exId) {
   const ex = exId ? exById(exId) : null;
   const p = ex ? ex.progression : { enabled: true, triggerReps: 7, stepKg: 1 };
+  const ds = ex ? (ex.defaultSets ?? 3) : 3;
   openModal(`
     <h2>${ex ? 'Übung bearbeiten' : 'Neue Übung'}</h2>
     <form id="ex-form">
@@ -471,6 +473,10 @@ function exerciseEditor(exId) {
       <div class="field">
         <label>Kategorie (optional)</label>
         <input class="input" name="category" placeholder="z. B. Ziehen, Push, Beine" value="${ex ? esc(ex.category || '') : ''}">
+      </div>
+      <div class="field">
+        <label>Standard-Sätze (werden automatisch angelegt)</label>
+        <input class="input" type="number" inputmode="numeric" name="defaultSets" min="1" max="12" value="${ds}">
       </div>
       <div class="card" style="margin:4px 0 14px">
         <div class="switch-row">
@@ -505,6 +511,7 @@ function saveExerciseFromForm(exId) {
   const data = {
     name,
     category: f.category.value.trim(),
+    defaultSets: Math.min(12, Math.max(1, Math.round(num(f.defaultSets.value) || 3))),
     usesBands: f.usesBands.checked,
     progression: {
       enabled: f.progEnabled.checked,
@@ -699,7 +706,10 @@ document.addEventListener('click', (e) => {
       if (!a.entries.some((en) => en.exerciseId === id)) {
         const sug = suggestWeight(id);
         const entry = { exerciseId: id, sets: [], _sug: sug };
-        entry.sets.push({ reps: '', weight: sug.weight || '', band: '', done: false });
+        const nSets = Math.max(1, (exById(id).defaultSets ?? 3));
+        for (let k = 0; k < nSets; k++) {
+          entry.sets.push({ reps: '', weight: sug.weight || '', band: '', done: false });
+        }
         a.entries.push(entry);
         store.save();
       }

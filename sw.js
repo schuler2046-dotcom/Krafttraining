@@ -1,5 +1,5 @@
 // Service worker: offline-first app shell cache.
-const CACHE = 'kraft-v1';
+const CACHE = 'kraft-v2';
 const ASSETS = [
   './',
   './index.html',
