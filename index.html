@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Krafttraining Tracker</title>
+  <meta name="description" content="Tracke Wiederholungen, Zusatzgewicht und deine Kraftentwicklung." />
+  <meta name="theme-color" content="#0f1115" />
+
+  <!-- iOS PWA -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Kraft" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="app-header">
+      <h1 id="header-title">Training</h1>
+      <button id="settings-btn" class="icon-btn" aria-label="Einstellungen">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
+    </header>
+
+    <!-- Views -->
+    <main id="view" class="view"></main>
+
+    <!-- Rest timer banner -->
+    <div id="rest-timer" class="rest-timer hidden" role="status" aria-live="polite">
+      <button id="rest-sub" class="rest-adjust" aria-label="Minus 15 Sekunden">−15</button>
+      <div class="rest-body">
+        <span class="rest-label">Pause</span>
+        <span id="rest-count" class="rest-count">01:30</span>
+      </div>
+      <button id="rest-add" class="rest-adjust" aria-label="Plus 15 Sekunden">+15</button>
+      <button id="rest-skip" class="rest-skip" aria-label="Pause beenden">✕</button>
+    </div>
+
+    <!-- Bottom navigation -->
+    <nav class="tabbar" id="tabbar">
+      <button class="tab" data-tab="training" aria-label="Training">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6.5 6.5l11 11M21 21l-1-1M3 3l1 1M18 22l4-4M2 6l4-4M7 17l-5 5M17 7l5-5"></path>
+        </svg>
+        <span>Training</span>
+      </button>
+      <button class="tab" data-tab="history" aria-label="Verlauf">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 3v5h5"></path>
+          <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"></path>
+          <path d="M12 7v5l4 2"></path>
+        </svg>
+        <span>Verlauf</span>
+      </button>
+      <button class="tab" data-tab="progress" aria-label="Fortschritt">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 3v18h18"></path>
+          <path d="M7 15l4-5 4 3 5-7"></path>
+        </svg>
+        <span>Fortschritt</span>
+      </button>
+      <button class="tab" data-tab="exercises" aria-label="Übungen">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M16 21h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+          <line x1="7" y1="12" x2="17" y2="12"></line>
+        </svg>
+        <span>Übungen</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- Modal host -->
+  <div id="modal-root"></div>
+
+  <!-- Unlockable beep for iOS-reliable rest timer sound -->
+  <audio id="beep" preload="auto" src="beep.wav"></audio>
+
+  <script src="app.js"></script>
+</body>
+</html>
