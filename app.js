@@ -7,7 +7,7 @@
 
 const STORAGE_KEY = 'kraft_tracker_v1';
 const DEFAULTS = {
-  settings: { unit: 'kg', restDefaultSec: 120, theme: 'dark' },
+  settings: { unit: 'kg', restDefaultSec: 120, theme: 'dark', weeklyGoal: 2 },
   exercises: [],
   sessions: [],
   bodyweight: [],
@@ -41,7 +41,18 @@ const store = {
 /* ---------- Helpers ---------- */
 const $ = (sel, root = document) => root.querySelector(sel);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-const todayISO = () => new Date().toISOString().slice(0, 10);
+// Lokales Datum als YYYY-MM-DD (nicht UTC), damit Kalendertage zu Trainingstagen passen.
+function localISO(d) {
+  const x = d || new Date();
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+}
+const todayISO = () => localISO(new Date());
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+function startOfWeekMon(d) {
+  const x = new Date(d); x.setHours(0, 0, 0, 0);
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); // Montag = Wochenstart
+  return x;
+}
 const num = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
 
 function esc(s) {
@@ -128,7 +139,8 @@ function suggestWeight(exId) {
 const ui = {
   tab: 'training',
   progressExId: null,
-  progressMetric: 'maxWeight'
+  progressMetric: 'maxWeight',
+  calMonth: null
 };
 
 const TAB_TITLES = {
@@ -263,19 +275,6 @@ function exerciseBlock(entry, ei) {
 /* ============================================================
    VIEW: Verlauf
    ============================================================ */
-function computeStreak() {
-  const days = new Set(store.db.sessions.map((s) => s.dateISO));
-  let streak = 0;
-  const d = new Date();
-  // Erlaube "heute noch nicht trainiert": starte ggf. bei gestern.
-  if (!days.has(d.toISOString().slice(0, 10))) d.setDate(d.getDate() - 1);
-  for (;;) {
-    const iso = d.toISOString().slice(0, 10);
-    if (days.has(iso)) { streak++; d.setDate(d.getDate() - 1); } else break;
-  }
-  return streak;
-}
-
 function sessionVolume(s) {
   let v = 0;
   for (const e of s.entries) for (const set of e.sets) v += num(set.reps) * num(set.weight);
@@ -283,43 +282,89 @@ function sessionVolume(s) {
 }
 
 function viewHistory() {
-  const sessions = [...store.db.sessions].sort((a, b) => b.dateISO.localeCompare(a.dateISO));
-  if (!sessions.length) {
-    return `<div class="empty">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
-      <h3>Noch kein Verlauf</h3>
-      <p class="muted small">Abgeschlossene Trainings erscheinen hier.</p>
-    </div>`;
+  // Trainings nach Datum gruppieren
+  const byDate = {};
+  store.db.sessions.forEach((s) => { (byDate[s.dateISO] = byDate[s.dateISO] || []).push(s); });
+
+  if (!ui.calMonth) ui.calMonth = new Date();
+  const view = ui.calMonth;
+  const year = view.getFullYear(), month = view.getMonth();
+  const monthTitle = view.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+  const lead = (new Date(year, month, 1).getDay() + 6) % 7; // Leerzellen bis Montag
+  const dim = new Date(year, month + 1, 0).getDate();
+  const tIso = todayISO();
+
+  const wd = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
+    .map((d) => `<div class="cal-wd">${d}</div>`).join('');
+
+  let cells = '';
+  for (let i = 0; i < lead; i++) cells += `<div class="cal-cell empty"></div>`;
+  for (let n = 1; n <= dim; n++) {
+    const iso = localISO(new Date(year, month, n));
+    const has = !!byDate[iso];
+    const today = iso === tIso ? ' today' : '';
+    if (has) {
+      cells += `<button class="cal-cell has${today}" data-action="open-day" data-date="${iso}">
+        <span class="cal-num">${n}</span><span class="cal-dot"></span></button>`;
+    } else {
+      cells += `<div class="cal-cell${today}"><span class="cal-num">${n}</span></div>`;
+    }
   }
-  const streak = computeStreak();
-  const last7 = [...Array(7)].map((_, i) => {
-    const d = new Date(); d.setDate(d.getDate() - (6 - i));
-    const iso = d.toISOString().slice(0, 10);
-    return store.db.sessions.some((s) => s.dateISO === iso);
+
+  const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+  const monthCount = Object.keys(byDate).filter((iso) => iso.startsWith(monthPrefix)).length;
+
+  // Wochenziel (immer aktuelle reale Woche, Mo–So)
+  const goal = store.db.settings.weeklyGoal || 2;
+  const ws = startOfWeekMon(new Date()), we = addDays(ws, 7);
+  const weekDays = new Set();
+  store.db.sessions.forEach((s) => {
+    const d = new Date(s.dateISO + 'T00:00:00');
+    if (d >= ws && d < we) weekDays.add(s.dateISO);
   });
-  const items = sessions.map((s) => {
-    const names = s.entries.map((e) => (exById(e.exerciseId) || {}).name).filter(Boolean).join(' · ');
-    const vol = sessionVolume(s);
-    return `
-      <div class="session-item" data-action="open-session" data-id="${s.id}">
-        <div class="si-top">
-          <span class="si-date">${esc(fmtDateLong(s.dateISO))}</span>
-          <span class="si-vol">${vol > 0 ? fmtWeight(vol) + ' kg Vol.' : s.entries.reduce((a, e) => a + e.sets.length, 0) + ' Sätze'}</span>
-        </div>
-        <div class="si-ex">${esc(names || 'Keine Übungen')}</div>
-      </div>`;
-  }).join('');
+  const done = weekDays.size;
+  const reached = done >= goal;
+  const remaining = Math.max(0, goal - done);
+  const dotCount = Math.max(goal, done);
 
   return `
-    <div class="streak-row">
-      <span class="streak-badge">🔥 ${streak} Tag${streak === 1 ? '' : 'e'} Streak</span>
-      <div class="dots" style="margin-left:auto">
-        ${last7.map((on) => `<span class="dot ${on ? 'on' : ''}"></span>`).join('')}
+    <div class="card week-goal">
+      <div class="row-between">
+        <div><div class="wg-title">Diese Woche</div><div class="wg-sub">Ziel: ${goal}× pro Woche</div></div>
+        <div class="wg-count">${done}<span>/${goal}</span></div>
       </div>
+      <div class="wg-dots">
+        ${[...Array(dotCount)].map((_, i) => `<span class="wg-dot ${i < done ? 'on' : ''}"></span>`).join('')}
+      </div>
+      <div class="wg-msg ${reached ? 'ok' : ''}">${reached ? 'Wochenziel erreicht ✅' : `Noch ${remaining} Training${remaining === 1 ? '' : 's'} bis zum Ziel`}</div>
     </div>
-    <div class="section-title">${sessions.length} Training${sessions.length === 1 ? '' : 's'}</div>
-    ${items}
+
+    <div class="card cal-card">
+      <div class="cal-head">
+        <button class="cal-nav" data-action="cal-prev" aria-label="Vorheriger Monat">‹</button>
+        <div class="cal-title">${esc(monthTitle)}</div>
+        <button class="cal-nav" data-action="cal-next" aria-label="Nächster Monat">›</button>
+      </div>
+      <div class="cal-grid">${wd}</div>
+      <div class="cal-grid cal-days">${cells}</div>
+      <div class="cal-legend"><span class="cal-dot"></span> Trainingstag · ${monthCount} in diesem Monat</div>
+    </div>
   `;
+}
+
+function openDay(iso) {
+  const list = store.db.sessions.filter((s) => s.dateISO === iso);
+  if (!list.length) return;
+  if (list.length === 1) { openSessionDetail(list[0].id); return; }
+  const items = list.map((s) => {
+    const names = s.entries.map((e) => (exById(e.exerciseId) || {}).name).filter(Boolean).join(' · ');
+    return `<div class="list-item" data-action="open-session" data-id="${s.id}">
+      <div class="li-body"><div class="li-title">${s.entries.length} Übung(en)</div>
+      <div class="li-sub">${esc(names || 'Keine Übungen')}</div></div>
+      <svg class="li-chevron" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+    </div>`;
+  }).join('');
+  openModal(`<h2>${esc(fmtDateLong(iso))}</h2><p class="muted small" style="margin-bottom:12px">${list.length} Trainings an diesem Tag</p>${items}`);
 }
 
 /* ============================================================
@@ -606,6 +651,12 @@ function openSettings() {
       </select>
     </div>
     <div class="field">
+      <label>Wochenziel (Trainings pro Woche)</label>
+      <select class="input" data-action="set-goal">
+        ${[1, 2, 3, 4, 5, 6].map((g) => `<option value="${g}" ${st.weeklyGoal === g ? 'selected' : ''}>${g}× pro Woche</option>`).join('')}
+      </select>
+    </div>
+    <div class="field">
       <label>Einheit</label>
       <input class="input" value="Kilogramm (kg)" disabled>
     </div>
@@ -808,6 +859,17 @@ document.addEventListener('click', (e) => {
     case 'open-session':
       openSessionDetail(t.dataset.id); break;
 
+    case 'open-day':
+      openDay(t.dataset.date); break;
+
+    case 'cal-prev':
+      ui.calMonth = new Date((ui.calMonth || new Date()).getFullYear(), (ui.calMonth || new Date()).getMonth() - 1, 1);
+      render(); break;
+
+    case 'cal-next':
+      ui.calMonth = new Date((ui.calMonth || new Date()).getFullYear(), (ui.calMonth || new Date()).getMonth() + 1, 1);
+      render(); break;
+
     case 'delete-session': {
       const id = t.dataset.id;
       store.db.sessions = store.db.sessions.filter((x) => x.id !== id);
@@ -887,6 +949,8 @@ document.addEventListener('change', (e) => {
       store.save(); applyTheme();
     } else if (act.dataset.action === 'set-rest') {
       store.db.settings.restDefaultSec = +e.target.value; store.save();
+    } else if (act.dataset.action === 'set-goal') {
+      store.db.settings.weeklyGoal = +e.target.value; store.save();
     } else if (act.dataset.action === 'select-progress-ex') {
       ui.progressExId = e.target.value; render();
     }
