@@ -1,5 +1,10 @@
 // Service worker: offline-first app shell cache.
-const CACHE = 'kraft-v5';
+//
+// WICHTIG: Der Service Worker verwaltet ausschließlich den CODE-Cache (HTML/CSS/JS/
+// Icons). Beim Aktivieren einer neuen Version werden nur ALTE CODE-CACHES gelöscht –
+// niemals der localStorage. Die Nutzerdaten (Übungen, Trainings, Verlauf, laufendes
+// Training, Fortschritt) liegen im localStorage und bleiben bei Updates unangetastet.
+const CACHE = 'kraft-v6';
 const ASSETS = [
   './',
   './index.html',

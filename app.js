@@ -5,8 +5,14 @@
    Datenmodell in localStorage, ein JSON-Objekt.
    ============================================================ */
 
+// WICHTIG: Dieser Schlüssel darf sich NIE ändern – er verknüpft die App dauerhaft
+// mit deinen gespeicherten Daten. App-Updates tauschen nur den Code (Service-Worker-
+// Cache), lassen diesen localStorage-Eintrag aber unangetastet. So bleiben Übungen,
+// Trainings, Verlauf, laufendes Training und Fortschritt bei jedem Update erhalten.
 const STORAGE_KEY = 'kraft_tracker_v1';
+const SCHEMA_VERSION = 1;
 const DEFAULTS = {
+  schemaVersion: SCHEMA_VERSION,
   settings: { unit: 'kg', restDefaultSec: 120, theme: 'dark', weeklyGoal: 2 },
   exercises: [],
   sessions: [],
@@ -14,27 +20,64 @@ const DEFAULTS = {
   active: null
 };
 
+const EXERCISE_DEFAULTS = {
+  type: 'reps_weight', defaultSets: 3, favorite: false, usesBands: false
+};
+
 /* ---------- Store ---------- */
 const store = {
   db: null,
   load() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      this.db = raw ? JSON.parse(raw) : structuredClone(DEFAULTS);
-    } catch (e) {
+    let raw = null;
+    try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { raw = null; }
+    if (raw) {
+      try {
+        this.db = JSON.parse(raw);
+      } catch (e) {
+        // Beschädigte Daten NICHT überschreiben: als Sicherung wegschreiben und
+        // leer starten, damit nichts unwiederbringlich verloren geht.
+        try { localStorage.setItem(STORAGE_KEY + '__corrupt_' + Date.now(), raw); } catch (_) {}
+        this.db = structuredClone(DEFAULTS);
+      }
+    } else {
       this.db = structuredClone(DEFAULTS);
     }
-    // Fülle fehlende Felder auf (Migration/Robustheit).
-    for (const k of Object.keys(DEFAULTS)) {
-      if (!(k in this.db)) this.db[k] = structuredClone(DEFAULTS[k]);
-    }
-    for (const k of Object.keys(DEFAULTS.settings)) {
-      if (!(k in this.db.settings)) this.db.settings[k] = DEFAULTS.settings[k];
-    }
+    this.migrate();
+    this.save(); // normalisierte/migrierte Struktur direkt dauerhaft sichern
     return this.db;
   },
+  // Ergänzt bei Updates neue Felder mit Standardwerten, OHNE bestehende Daten
+  // zu verändern. Dadurch werden alte Trainings/Übungen automatisch übernommen.
+  migrate() {
+    const db = this.db;
+    if (!db || typeof db !== 'object') { this.db = structuredClone(DEFAULTS); return; }
+    for (const k of Object.keys(DEFAULTS)) {
+      if (!(k in db)) db[k] = structuredClone(DEFAULTS[k]);
+    }
+    if (!db.settings || typeof db.settings !== 'object') db.settings = {};
+    for (const k of Object.keys(DEFAULTS.settings)) {
+      if (db.settings[k] === undefined) db.settings[k] = DEFAULTS.settings[k];
+    }
+    if (!Array.isArray(db.exercises)) db.exercises = [];
+    if (!Array.isArray(db.sessions)) db.sessions = [];
+    if (!Array.isArray(db.bodyweight)) db.bodyweight = [];
+    db.exercises.forEach((ex) => {
+      for (const k of Object.keys(EXERCISE_DEFAULTS)) {
+        if (ex[k] === undefined || ex[k] === null) ex[k] = EXERCISE_DEFAULTS[k];
+      }
+      if (!ex.progression || typeof ex.progression !== 'object') {
+        ex.progression = { enabled: true, triggerReps: 7, stepKg: 1 };
+      }
+    });
+    db.schemaVersion = SCHEMA_VERSION;
+  },
   save() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(this.db));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.db));
+    } catch (e) {
+      // Speicher voll o. Ä. – Nutzer informieren, aber nichts löschen.
+      try { toast('Speichern fehlgeschlagen – Speicher evtl. voll'); } catch (_) {}
+    }
   }
 };
 
@@ -683,7 +726,7 @@ function openSettings() {
     </div>
     <input type="file" id="import-file" accept="application/json,.json" class="hidden">
     <button class="btn btn-danger mt" data-action="reset-data">Alle Daten löschen</button>
-    <p class="muted small mt" style="text-align:center">Daten liegen nur lokal auf diesem Gerät.</p>
+    <p class="muted small mt" style="text-align:center">Daten liegen nur lokal auf diesem Gerät und bleiben bei App-Updates automatisch erhalten. Tipp: ab und zu ein Backup exportieren.</p>
   `);
 }
 
@@ -1059,8 +1102,7 @@ function importData(file) {
       if (!data || typeof data !== 'object' || !Array.isArray(data.exercises)) throw new Error('Ungültig');
       if (!confirm('Backup importieren? Aktuelle Daten werden ersetzt.')) return;
       store.db = data;
-      for (const k of Object.keys(DEFAULTS)) if (!(k in store.db)) store.db[k] = structuredClone(DEFAULTS[k]);
-      for (const k of Object.keys(DEFAULTS.settings)) if (!(k in store.db.settings)) store.db.settings[k] = DEFAULTS.settings[k];
+      store.migrate(); // fehlende Felder auffüllen, bestehende behalten
       store.save();
       closeModal(); applyTheme(); render();
       toast('Backup importiert');
