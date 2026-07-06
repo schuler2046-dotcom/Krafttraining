@@ -140,7 +140,8 @@ const ui = {
   tab: 'training',
   progressExId: null,
   progressMetric: 'maxWeight',
-  calMonth: null
+  calMonth: null,
+  expanded: new Set() // exerciseIds mit aufgeklappten Satz-Details
 };
 
 const TAB_TITLES = {
@@ -217,6 +218,13 @@ function exerciseBlock(entry, ei) {
 
   const pr = prsForExercise(ex.id);
   const entryWeight = entry.sets.length ? (entry.sets[0].weight ?? '') : '';
+  const expanded = ui.expanded.has(ex.id);
+  const total = entry.sets.length;
+  const doneCount = entry.sets.filter((s) => s.done).length;
+  const allDone = total > 0 && doneCount === total;
+  const weightLabel = (entryWeight !== '' && entryWeight != null && num(entryWeight) > 0)
+    ? `${fmtWeight(entryWeight)} kg` : 'Körpergewicht';
+
   const rows = entry.sets.map((set, si) => {
     const done = set.done ? ' done' : '';
     const r = num(set.reps), w = num(set.weight);
@@ -240,18 +248,9 @@ function exerciseBlock(entry, ei) {
     `;
   }).join('');
 
-  return `
-    <div class="ex-block${withBand}">
-      <div class="ex-head">
-        <div class="ex-head-main">
-          <div class="ex-name">${esc(ex.name)}</div>
-          ${hint}
-        </div>
-        <div class="ex-move">
-          <button class="move-btn" data-action="move-exercise" data-ei="${ei}" data-dir="-1" aria-label="Nach oben">↑</button>
-          <button class="move-btn" data-action="move-exercise" data-ei="${ei}" data-dir="1" aria-label="Nach unten">↓</button>
-        </div>
-      </div>
+  const detail = expanded ? `
+    <div class="ex-detail">
+      ${hint}
       <div class="ex-weight-bar">
         <span class="ewb-label">Gewicht (alle Sätze)</span>
         <div class="ewb-input">
@@ -268,6 +267,23 @@ function exerciseBlock(entry, ei) {
         <button class="link-btn" data-action="add-set" data-ei="${ei}">＋ Satz</button>
         <button class="link-btn danger" data-action="remove-exercise" data-ei="${ei}">Entfernen</button>
       </div>
+    </div>` : '';
+
+  return `
+    <div class="ex-block${withBand}${expanded ? ' expanded' : ''}" data-exid="${ex.id}" data-ei="${ei}">
+      <div class="ex-summary">
+        <div class="ex-sum-tap" data-action="toggle-expand" data-exid="${ex.id}">
+          <div class="ex-sum-main">
+            <div class="ex-name">${esc(ex.name)}${allDone ? ' <span class="ex-done-badge">✓</span>' : ''}</div>
+            <div class="ex-sum-sub">${weightLabel}${total ? ` · <span class="${allDone ? 'sub-done' : ''}">${doneCount}/${total} Sätze</span>` : ''}</div>
+          </div>
+          <svg class="ex-chevron" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <button class="drag-handle" data-drag data-ei="${ei}" aria-label="Zum Verschieben gedrückt halten und ziehen">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>
+        </button>
+      </div>
+      ${detail}
     </div>
   `;
 }
@@ -797,18 +813,17 @@ document.addEventListener('click', (e) => {
       const id = t.dataset.id;
       if (!a.entries.some((en) => en.exerciseId === id)) {
         a.entries.push(buildEntry(id));
+        ui.expanded.add(id); // frisch hinzugefügte Übung direkt aufgeklappt
         store.save();
       }
       closeModal(); render();
       break;
     }
 
-    case 'move-exercise': {
-      const ei = +t.dataset.ei, ni = ei + (+t.dataset.dir);
-      if (ni < 0 || ni >= a.entries.length) break;
-      [a.entries[ei], a.entries[ni]] = [a.entries[ni], a.entries[ei]];
-      persistOrderFromEntries();
-      store.save(); render();
+    case 'toggle-expand': {
+      const id = t.dataset.exid;
+      if (ui.expanded.has(id)) ui.expanded.delete(id); else ui.expanded.add(id);
+      render();
       break;
     }
 
@@ -910,6 +925,72 @@ $('#tabbar').addEventListener('click', (e) => {
 
 // Header settings
 $('#settings-btn').addEventListener('click', () => { restTimer.unlock(); openSettings(); });
+
+/* ============================================================
+   Drag & Drop: Übungen im Training per Griff verschieben
+   ============================================================ */
+let dnd = null;
+
+document.addEventListener('pointerdown', (e) => {
+  const handle = e.target.closest('[data-drag]');
+  if (!handle || !store.db.active) return;
+  const block = handle.closest('.ex-block');
+  const container = block.parentElement;
+  const items = [...container.querySelectorAll('.ex-block')];
+  const index = items.indexOf(block);
+  if (index < 0) return;
+  e.preventDefault();
+  const rects = items.map((el) => el.getBoundingClientRect());
+  dnd = {
+    pointerId: e.pointerId, block, container, items, rects, index,
+    startY: e.clientY, unit: rects[index].height + 14, targetK: index, moved: false
+  };
+  try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+  block.classList.add('dragging');
+});
+
+document.addEventListener('pointermove', (e) => {
+  if (!dnd || e.pointerId !== dnd.pointerId) return;
+  e.preventDefault();
+  dnd.moved = true;
+  const dy = e.clientY - dnd.startY;
+  dnd.block.style.transform = `translateY(${dy}px)`;
+
+  // Einfügeposition = Anzahl anderer Karten, deren Mitte oberhalb des Zeigers liegt
+  let k = 0;
+  dnd.rects.forEach((r, i) => {
+    if (i === dnd.index) return;
+    if (e.clientY > r.top + r.height / 2) k++;
+  });
+  dnd.targetK = k;
+
+  // Lücke visualisieren
+  dnd.items.forEach((el, i) => {
+    if (i === dnd.index) return;
+    let shift = 0;
+    if (k <= dnd.index) { if (i >= k && i < dnd.index) shift = dnd.unit; }
+    else { if (i > dnd.index && i <= k) shift = -dnd.unit; }
+    el.style.transform = shift ? `translateY(${shift}px)` : '';
+    el.style.transition = 'transform .15s';
+  });
+});
+
+function endDrag(e) {
+  if (!dnd || e.pointerId !== dnd.pointerId) return;
+  const { index, targetK, moved } = dnd;
+  dnd.block.classList.remove('dragging');
+  dnd = null;
+  if (moved && targetK !== index) {
+    const arr = store.db.active.entries;
+    const [it] = arr.splice(index, 1);
+    arr.splice(targetK, 0, it);
+    persistOrderFromEntries();
+    store.save();
+  }
+  render();
+}
+document.addEventListener('pointerup', endDrag);
+document.addEventListener('pointercancel', endDrag);
 
 // Eingaben in Sätze (Delegation über change/input)
 document.addEventListener('input', (e) => {

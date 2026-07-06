@@ -335,14 +335,67 @@ select.input {
   margin-bottom: 14px;
   overflow: hidden;
 }
-.ex-head {
+.ex-block.expanded { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.ex-block.dragging {
+  position: relative;
+  z-index: 40;
+  box-shadow: 0 12px 30px rgba(0,0,0,.4);
+  border-color: var(--accent);
+  opacity: .97;
+}
+
+/* Übersichtskopf (immer sichtbar) */
+.ex-summary { display: flex; align-items: stretch; }
+.ex-sum-tap {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px 10px;
+  gap: 10px;
+  padding: 15px 8px 15px 16px;
 }
-.ex-head .ex-name { font-weight: 700; font-size: 16px; }
-.ex-head .ex-hint { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.ex-sum-main { min-width: 0; }
+.ex-sum-main .ex-name {
+  font-weight: 700;
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ex-sum-sub { font-size: 13px; color: var(--muted); margin-top: 3px; }
+.ex-sum-sub .sub-done { color: var(--success); font-weight: 700; }
+.ex-done-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--success);
+  color: var(--success-ink);
+  font-size: 11px;
+  font-weight: 900;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+.ex-chevron { color: var(--muted-2); flex-shrink: 0; transition: transform .2s; }
+.ex-block.expanded .ex-chevron { transform: rotate(180deg); color: var(--accent-2); }
+
+.drag-handle {
+  flex-shrink: 0;
+  width: 46px;
+  border: none;
+  background: transparent;
+  color: var(--muted-2);
+  display: grid;
+  place-items: center;
+  touch-action: none; /* Griff blockiert Scrollen → sauberes Ziehen */
+  cursor: grab;
+  border-left: 1px solid var(--line);
+}
+.drag-handle:active { cursor: grabbing; color: var(--accent-2); }
+
+.ex-detail { border-top: 1px solid var(--line); padding-top: 8px; }
+.ex-detail .ex-hint { font-size: 12px; color: var(--muted); padding: 4px 16px 0; }
 .ex-hint.up { color: var(--success); }
 
 .set-head, .set-row {
