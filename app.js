@@ -253,7 +253,6 @@ function viewTraining() {
 function exerciseBlock(entry, ei) {
   const ex = exById(entry.exerciseId);
   if (!ex) return '';
-  const withBand = ex.usesBands ? ' with-band' : '';
   const sug = entry._sug; // an Eintrag gehängt beim Hinzufügen
   const hint = sug && sug.bumped
     ? `<div class="ex-hint up">↑ Ziel +${fmtWeight(ex.progression.stepKg)} kg — beim letzten Mal ${sug.prevReps} WH im 1. Satz</div>`
@@ -261,28 +260,24 @@ function exerciseBlock(entry, ei) {
 
   const pr = prsForExercise(ex.id);
   const entryWeight = entry.sets.length ? (entry.sets[0].weight ?? '') : '';
+  const entryBand = entry.sets.length ? (entry.sets[0].band ?? '') : '';
   const expanded = ui.expanded.has(ex.id);
   const total = entry.sets.length;
   const doneCount = entry.sets.filter((s) => s.done).length;
   const allDone = total > 0 && doneCount === total;
   const weightLabel = (entryWeight !== '' && entryWeight != null && num(entryWeight) > 0)
     ? `${fmtWeight(entryWeight)} kg` : 'Körpergewicht';
+  const bandLabel = (ex.usesBands && entryBand !== '' && entryBand != null) ? ` · Band ${esc(entryBand)}` : '';
 
   const rows = entry.sets.map((set, si) => {
     const done = set.done ? ' done' : '';
     const r = num(set.reps), w = num(set.weight);
     const isPR = set.done && r > 0 && (w > pr.maxWeight || r > pr.maxReps || est1RM(w, r) > pr.e1rm + 0.01);
-    const bandCell = ex.usesBands ? `
-      <select class="set-input${done}" data-ei="${ei}" data-si="${si}" data-field="band" aria-label="Band-Stufe">
-        <option value="">–</option>
-        ${[1,2,3,4,5].map((n) => `<option value="${n}" ${String(set.band) === String(n) ? 'selected' : ''}>${n}</option>`).join('')}
-      </select>` : '';
     return `
       <div class="set-row">
         <div class="set-idx">${si + 1}</div>
         <input class="set-input${done}" type="number" inputmode="numeric" min="0" placeholder="0"
                value="${set.reps ?? ''}" data-ei="${ei}" data-si="${si}" data-field="reps" aria-label="Wiederholungen">
-        ${bandCell}
         <button class="set-check${done}" data-action="toggle-set" data-ei="${ei}" data-si="${si}" aria-label="Satz erledigt">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
         </button>
@@ -290,6 +285,15 @@ function exerciseBlock(entry, ei) {
       ${isPR ? `<div style="padding:0 16px 4px 60px"><span class="pr-flag">★ Neuer Rekord</span></div>` : ''}
     `;
   }).join('');
+
+  const bandBar = ex.usesBands ? `
+      <div class="ex-weight-bar">
+        <span class="ewb-label">Band (alle Sätze)</span>
+        <div class="ewb-input">
+          <input class="set-input band-input" type="text" placeholder="z. B. 2+3"
+                 value="${esc(entryBand)}" data-entry-band data-ei="${ei}" aria-label="Widerstandsband-Stärke für alle Sätze">
+        </div>
+      </div>` : '';
 
   const detail = expanded ? `
     <div class="ex-detail">
@@ -302,8 +306,9 @@ function exerciseBlock(entry, ei) {
           <span class="ewb-unit">kg</span>
         </div>
       </div>
+      ${bandBar}
       <div class="set-head">
-        <div>#</div><div>WDH</div>${ex.usesBands ? '<div>BAND</div>' : ''}<div></div>
+        <div>#</div><div>WDH</div><div></div>
       </div>
       ${rows}
       <div class="ex-actions">
@@ -313,12 +318,12 @@ function exerciseBlock(entry, ei) {
     </div>` : '';
 
   return `
-    <div class="ex-block${withBand}${expanded ? ' expanded' : ''}" data-exid="${ex.id}" data-ei="${ei}">
+    <div class="ex-block${expanded ? ' expanded' : ''}" data-exid="${ex.id}" data-ei="${ei}">
       <div class="ex-summary">
         <div class="ex-sum-tap" data-action="toggle-expand" data-exid="${ex.id}">
           <div class="ex-sum-main">
             <div class="ex-name">${esc(ex.name)}${allDone ? ' <span class="ex-done-badge">✓</span>' : ''}</div>
-            <div class="ex-sum-sub">${weightLabel}${total ? ` · <span class="${allDone ? 'sub-done' : ''}">${doneCount}/${total} Sätze</span>` : ''}</div>
+            <div class="ex-sum-sub">${weightLabel}${bandLabel}${total ? ` · <span class="${allDone ? 'sub-done' : ''}">${doneCount}/${total} Sätze</span>` : ''}</div>
           </div>
           <svg class="ex-chevron" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
         </div>
@@ -601,7 +606,7 @@ function exerciseEditor(exId) {
           <label class="switch"><input type="checkbox" name="favorite" ${ex && ex.favorite ? 'checked' : ''}><span class="slider"></span></label>
         </div>
         <div class="switch-row">
-          <div><div class="sw-label">Widerstandsbänder</div><div class="sw-sub">Band-Stufe 1–5 pro Satz erfassen</div></div>
+          <div><div class="sw-label">Widerstandsbänder</div><div class="sw-sub">Band-Stärke frei eintragen, z. B. "2+3" – gilt für alle Sätze</div></div>
           <label class="switch"><input type="checkbox" name="usesBands" ${ex && ex.usesBands ? 'checked' : ''}><span class="slider"></span></label>
         </div>
         <div class="switch-row">
@@ -677,14 +682,41 @@ function openSessionDetail(id) {
   if (!s) return;
   const blocks = s.entries.map((e) => {
     const ex = exById(e.exerciseId);
-    const sets = e.sets.filter((st) => num(st.reps) > 0).map((st, i) =>
-      `<div class="set-row" style="grid-template-columns:26px 1fr 1fr${ex && ex.usesBands ? ' 1fr' : ''}">
+    const doneSets = e.sets.filter((st) => num(st.reps) > 0);
+    // Gewicht/Band gelten normalerweise für alle Sätze einer Übung (einmalige Eingabe).
+    // Bei älteren Trainings, die noch abweichende Werte je Satz haben, zeigen wir sie
+    // sicherheitshalber weiterhin pro Zeile an, statt Informationen zu verlieren.
+    const weightVals = new Set(doneSets.map((st) => String(st.weight ?? '')));
+    const bandVals = new Set(doneSets.map((st) => String(st.band ?? '')));
+    const showWeightPerRow = weightVals.size > 1;
+    const showBandPerRow = !!(ex && ex.usesBands) && bandVals.size > 1;
+    const extraCols = (showWeightPerRow ? 1 : 0) + (showBandPerRow ? 1 : 0);
+    const gridCols = `26px 1fr${' 1fr'.repeat(extraCols)}`;
+
+    const metaParts = [];
+    if (!showWeightPerRow) {
+      const w = doneSets[0] ? doneSets[0].weight : '';
+      metaParts.push(w && num(w) > 0 ? `${fmtWeight(w)} kg` : 'Körpergewicht');
+    }
+    if (ex && ex.usesBands && !showBandPerRow) {
+      const b = doneSets[0] ? doneSets[0].band : '';
+      if (b) metaParts.push(`Band ${esc(b)}`);
+    }
+
+    const sets = doneSets.map((st, i) =>
+      `<div class="set-row" style="grid-template-columns:${gridCols}">
         <div class="set-idx">${i + 1}</div>
         <div class="muted">${num(st.reps)} WH</div>
-        <div class="muted">${st.weight ? fmtWeight(st.weight) + ' kg' : 'Körpergew.'}</div>
-        ${ex && ex.usesBands ? `<div class="muted">${st.band ? 'Band ' + st.band : '–'}</div>` : ''}
+        ${showWeightPerRow ? `<div class="muted">${st.weight ? fmtWeight(st.weight) + ' kg' : 'Körpergew.'}</div>` : ''}
+        ${showBandPerRow ? `<div class="muted">${st.band ? 'Band ' + esc(st.band) : '–'}</div>` : ''}
       </div>`).join('');
-    return `<div class="ex-block" style="margin-bottom:10px"><div class="ex-head"><div class="ex-name">${esc((ex || {}).name || 'Übung')}</div></div>${sets || '<p class="muted small" style="padding:0 16px 12px">Keine Sätze</p>'}</div>`;
+    return `<div class="ex-block" style="margin-bottom:10px">
+      <div class="ex-detail-head">
+        <div class="ex-name">${esc((ex || {}).name || 'Übung')}</div>
+        ${metaParts.length ? `<div class="ex-detail-meta">${metaParts.join(' · ')}</div>` : ''}
+      </div>
+      ${sets || '<p class="muted small" style="padding:0 16px 12px">Keine Sätze</p>'}
+    </div>`;
   }).join('');
   openModal(`
     <h2>${esc(fmtDateLong(s.dateISO))}</h2>
@@ -731,36 +763,88 @@ function openSettings() {
 }
 
 /* ============================================================
-   Rest-Timer (iOS-taugliches Beep-Pattern)
+   Audio-Session: eigenes Signal soll Musik/Podcasts nicht dauerhaft
+   stoppen, sondern nach dem Piepton automatisch weiterlaufen lassen.
+   Unterstützt seit iOS/Safari 16.4 (navigator.audioSession); auf
+   älteren Versionen no-op (Browser-Standardverhalten greift dann).
+   ============================================================ */
+function configureAudioSession() {
+  try {
+    if ('audioSession' in navigator) {
+      // "transient-solo": andere Wiedergabe (z. B. Musik-App) wird für den
+      // kurzen Piepton unterbrochen und läuft danach automatisch weiter –
+      // wie bei einer Navigationsansage oder einem Wecker.
+      navigator.audioSession.type = 'transient-solo';
+    }
+  } catch (e) { /* Feature nicht verfügbar – ignorieren */ }
+}
+
+/* ============================================================
+   Rest-Timer – zeitstempelbasiert (übersteht Sperrbildschirm/
+   Hintergrund korrekt) mit iOS-taugliches Beep-Pattern.
+
+   Statt Sekunden per setInterval herunterzuzählen (was beim Sperren
+   des Bildschirms pausiert/driftet), merken wir uns den realen
+   Ziel-Zeitpunkt (endAt) und berechnen die Restzeit immer aus der
+   tatsächlich vergangenen Zeit. Eine leise Endlos-Audiospur hält die
+   Wiedergabe-Session aktiv, damit iOS die Seite bei gesperrtem
+   Bildschirm nicht sofort komplett pausiert (das Muster, mit dem auch
+   Musik-/Podcast-Web-Player im Hintergrund weiterlaufen). Zusätzlich
+   wird beim Zurückkehren in die App (visibilitychange/pageshow) sofort
+   nachgerechnet, damit die Anzeige nie falsch stehen bleibt und ein
+   verpasster Ablauf sofort nachgeholt wird (Piepton + Hinweis).
    ============================================================ */
 const restTimer = {
-  remaining: 0, iv: null, audioReady: false,
+  endAt: 0, iv: null, audioReady: false,
   unlock() {
     if (this.audioReady) return;
     const a = $('#beep');
-    if (!a) return;
-    a.muted = true;
-    a.play().then(() => { a.pause(); a.currentTime = 0; a.muted = false; this.audioReady = true; }).catch(() => {});
+    const k = $('#keepalive');
+    if (!a || !k) return;
+    a.muted = true; k.muted = true;
+    Promise.all([
+      a.play().then(() => { a.pause(); a.currentTime = 0; }).catch(() => {}),
+      k.play().then(() => { k.pause(); k.currentTime = 0; }).catch(() => {})
+    ]).then(() => { a.muted = false; k.muted = false; this.audioReady = true; });
   },
   start(seconds) {
-    this.stop(true);
-    this.remaining = seconds;
+    this.stop();
+    this.endAt = Date.now() + seconds * 1000;
     const el = $('#rest-timer');
     el.classList.remove('hidden');
     this.tickUI();
-    this.iv = setInterval(() => {
-      this.remaining--;
-      if (this.remaining <= 0) { this.finish(); }
-      else this.tickUI();
-    }, 1000);
+    this.startKeepAlive();
+    // Häufiger als 1×/Sek. prüfen, damit wir nach einer kurzen Drosselung
+    // (z. B. Tab kurz im Hintergrund) schneller wieder aufholen.
+    this.iv = setInterval(() => this.tick(), 250);
   },
-  tickUI() {
-    const m = Math.floor(this.remaining / 60), s = this.remaining % 60;
+  startKeepAlive() {
+    const k = $('#keepalive');
+    if (!k) return;
+    k.loop = true;
+    k.play().catch(() => {});
+  },
+  stopKeepAlive() {
+    const k = $('#keepalive');
+    if (!k) return;
+    k.pause();
+    try { k.currentTime = 0; } catch (e) {}
+  },
+  tick() {
+    if (!this.endAt) return;
+    const remaining = Math.round((this.endAt - Date.now()) / 1000);
+    if (remaining <= 0) { this.finish(); return; }
+    this.tickUI(remaining);
+  },
+  tickUI(remainingOverride) {
+    const remaining = remainingOverride != null ? remainingOverride : Math.max(0, Math.round((this.endAt - Date.now()) / 1000));
+    const m = Math.floor(remaining / 60), s = remaining % 60;
     $('#rest-count').textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    $('#rest-timer').classList.toggle('ending', this.remaining <= 5);
+    $('#rest-timer').classList.toggle('ending', remaining <= 5);
   },
   adjust(delta) {
-    this.remaining = Math.max(1, this.remaining + delta);
+    if (!this.endAt) return;
+    this.endAt = Math.max(Date.now() + 1000, this.endAt + delta * 1000);
     this.tickUI();
   },
   finish() {
@@ -773,13 +857,25 @@ const restTimer = {
     if (!a) return;
     try { a.currentTime = 0; a.play().catch(() => {}); } catch (e) {}
   },
-  stop(silent) {
+  stop() {
     if (this.iv) clearInterval(this.iv);
     this.iv = null;
+    this.endAt = 0;
+    this.stopKeepAlive();
     const el = $('#rest-timer');
     if (el) { el.classList.add('hidden'); el.classList.remove('ending'); }
   }
 };
+
+// Sobald die App wieder sichtbar/aktiv wird (Bildschirm entsperrt, zurück aus
+// dem Hintergrund), sofort die Restzeit korrigieren bzw. einen verpassten
+// Timer-Ablauf nachholen – unabhängig davon, ob setInterval zwischenzeitlich
+// gedrosselt wurde.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) restTimer.tick();
+});
+window.addEventListener('pageshow', () => restTimer.tick());
+window.addEventListener('focus', () => restTimer.tick());
 
 /* ============================================================
    Aktionen / Event-Delegation
@@ -1045,6 +1141,13 @@ document.addEventListener('input', (e) => {
     if (en) { en.sets.forEach((s) => { s.weight = ew.value; }); store.save(); }
     return;
   }
+  // Band-Stärke gilt ebenfalls für alle Sätze der Übung (freier Text, z. B. "2+3")
+  const eb = e.target.closest('[data-entry-band]');
+  if (eb) {
+    const en = store.db.active.entries[+eb.dataset.ei];
+    if (en) { en.sets.forEach((s) => { s.band = eb.value; }); store.save(); }
+    return;
+  }
   const inp = e.target.closest('[data-field]');
   if (!inp) return;
   const en = store.db.active.entries[+inp.dataset.ei];
@@ -1124,6 +1227,7 @@ function applyTheme() {
 function init() {
   store.load();
   applyTheme();
+  configureAudioSession();
   render();
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});

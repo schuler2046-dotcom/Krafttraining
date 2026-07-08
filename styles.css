@@ -398,6 +398,11 @@ select.input {
 .ex-detail .ex-hint { font-size: 12px; color: var(--muted); padding: 4px 16px 0; }
 .ex-hint.up { color: var(--success); }
 
+/* Verlauf: Trainings-Detailansicht (statischer Kopf je Übung) */
+.ex-detail-head { padding: 14px 16px 8px; }
+.ex-detail-head .ex-name { font-weight: 700; font-size: 16px; }
+.ex-detail-meta { font-size: 13px; color: var(--muted); margin-top: 2px; }
+
 .set-head, .set-row {
   display: grid;
   grid-template-columns: 26px 1fr 46px;
@@ -405,12 +410,8 @@ select.input {
   align-items: center;
   padding: 6px 16px;
 }
-.ex-block.with-band .set-head,
-.ex-block.with-band .set-row {
-  grid-template-columns: 26px 1fr 66px 46px;
-}
 
-/* Gewicht je Übung (einmal für alle Sätze) */
+/* Gewicht/Band je Übung (je einmal für alle Sätze) */
 .ex-weight-bar {
   display: flex;
   align-items: center;
@@ -418,9 +419,10 @@ select.input {
   gap: 12px;
   padding: 2px 16px 10px;
 }
-.ewb-label { font-size: 13px; color: var(--muted); font-weight: 600; }
+.ewb-label { font-size: 13px; color: var(--muted); font-weight: 600; flex-shrink: 0; }
 .ewb-input { display: flex; align-items: center; gap: 8px; }
 .ewb-input input { width: 92px; text-align: center; }
+.ewb-input input.band-input { width: 120px; }
 .ewb-unit { color: var(--muted); font-weight: 700; font-size: 14px; }
 
 /* Übung verschieben */
