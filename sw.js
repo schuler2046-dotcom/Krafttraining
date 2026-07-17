@@ -4,7 +4,7 @@
 // Icons). Beim Aktivieren einer neuen Version werden nur ALTE CODE-CACHES gelöscht –
 // niemals der localStorage. Die Nutzerdaten (Übungen, Trainings, Verlauf, laufendes
 // Training, Fortschritt) liegen im localStorage und bleiben bei Updates unangetastet.
-const CACHE = 'kraft-v7';
+const CACHE = 'kraft-v8';
 const ASSETS = [
   './',
   './index.html',

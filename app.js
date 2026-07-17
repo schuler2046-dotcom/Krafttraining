@@ -159,6 +159,11 @@ function prsForExercise(exId) {
 }
 
 // Auto-Progression: Vorschlag fürs Zusatzgewicht der nächsten Session.
+// Ermittelt das zuletzt verwendete Gewicht als Vorbefüllung (nie automatisch
+// erhöht) und ob im letzten 1. Satz die Ziel-Wiederholungen erreicht wurden –
+// das steuert nur einen Hinweistext, keine automatische Gewichtsänderung mehr,
+// da eine pauschale Steigerung (z. B. +1 kg) nicht bei jeder Übung möglich ist
+// (z. B. bei Widerstandsbändern).
 function suggestWeight(exId) {
   const ex = exById(exId);
   const sorted = [...store.db.sessions].sort((a, b) => b.dateISO.localeCompare(a.dateISO));
@@ -168,12 +173,10 @@ function suggestWeight(exId) {
     const first = entry.sets.find((st) => num(st.reps) > 0) || entry.sets[0];
     const base = num(first.weight);
     const prog = ex.progression || {};
-    if (prog.enabled && num(first.reps) >= num(prog.triggerReps)) {
-      return { weight: base + num(prog.stepKg), bumped: true, prevReps: num(first.reps) };
-    }
-    return { weight: base, bumped: false, prevReps: num(first.reps) };
+    const reached = !!prog.enabled && num(first.reps) >= num(prog.triggerReps);
+    return { weight: base, reached, prevReps: num(first.reps) };
   }
-  return { weight: 0, bumped: false, prevReps: 0 };
+  return { weight: 0, reached: false, prevReps: 0 };
 }
 
 /* ============================================================
@@ -194,17 +197,30 @@ const TAB_TITLES = {
   exercises: 'Übungen'
 };
 
-function render() {
+let lastRenderedTab = null;
+
+// Scrollt nur beim Wechsel des Tabs nach oben (echte neue Ansicht). Bleibt man
+// im selben Tab (z. B. Satz abhaken, Übung auf-/zuklappen, Reihenfolge ändern),
+// bleibt die aktuelle Scroll-Position erhalten statt nach jedem Tap nach oben
+// zu springen.
+function render(opts) {
   $('#header-title').textContent = TAB_TITLES[ui.tab];
   document.querySelectorAll('.tab').forEach((t) =>
     t.classList.toggle('active', t.dataset.tab === ui.tab));
   const view = $('#view');
-  view.scrollTop = 0;
+  const tabChanged = ui.tab !== lastRenderedTab || (opts && opts.resetScroll);
+  const prevScroll = tabChanged ? 0 : view.scrollTop;
   if (ui.tab === 'training') view.innerHTML = viewTraining();
   else if (ui.tab === 'history') view.innerHTML = viewHistory();
   else if (ui.tab === 'progress') view.innerHTML = viewProgress();
   else if (ui.tab === 'exercises') view.innerHTML = viewExercises();
-  document.documentElement.scrollTop = 0;
+  if (tabChanged) {
+    view.scrollTop = 0;
+    document.documentElement.scrollTop = 0;
+  } else {
+    view.scrollTop = prevScroll;
+  }
+  lastRenderedTab = ui.tab;
 }
 
 function toast(msg) {
@@ -254,9 +270,11 @@ function exerciseBlock(entry, ei) {
   const ex = exById(entry.exerciseId);
   if (!ex) return '';
   const sug = entry._sug; // an Eintrag gehängt beim Hinzufügen
-  const hint = sug && sug.bumped
-    ? `<div class="ex-hint up">↑ Ziel +${fmtWeight(ex.progression.stepKg)} kg — beim letzten Mal ${sug.prevReps} WH im 1. Satz</div>`
-    : (sug && sug.prevReps ? `<div class="ex-hint">Letztes Mal ${sug.prevReps} WH im 1. Satz · Gewicht halten</div>` : '');
+  // Reine Information, keine automatische Gewichtsänderung: eine pauschale Zahl ist
+  // z. B. bei Widerstandsbändern nicht immer möglich – die Entscheidung bleibt beim Nutzer.
+  const hint = sug && sug.reached
+    ? `<div class="ex-hint up">💪 Letztes Mal ${sug.prevReps} WH im 1. Satz erreicht — die Übung darf gern schwerer werden</div>`
+    : (sug && sug.prevReps ? `<div class="ex-hint">Letztes Mal ${sug.prevReps} WH im 1. Satz</div>` : '');
 
   const pr = prsForExercise(ex.id);
   const entryWeight = entry.sets.length ? (entry.sets[0].weight ?? '') : '';
@@ -547,7 +565,7 @@ function viewExercises() {
     tags.push(`<span class="li-tag">${ex.defaultSets ?? 3} Sätze</span>`);
     if (ex.usesBands) tags.push(`<span class="li-tag band">Bänder</span>`);
     if (ex.progression && ex.progression.enabled)
-      tags.push(`<span class="li-tag">+${fmtWeight(ex.progression.stepKg)}kg @ ${ex.progression.triggerReps}WH</span>`);
+      tags.push(`<span class="li-tag">Hinweis ab ${ex.progression.triggerReps} WH</span>`);
     return `
       <div class="list-item">
         <button class="star-btn${ex.favorite ? ' on' : ''}" data-action="toggle-fav" data-id="${ex.id}" aria-label="Favorit">${ex.favorite ? '★' : '☆'}</button>
@@ -582,7 +600,7 @@ function closeModal() { $('#modal-root').innerHTML = ''; }
 
 function exerciseEditor(exId) {
   const ex = exId ? exById(exId) : null;
-  const p = ex ? ex.progression : { enabled: true, triggerReps: 7, stepKg: 1 };
+  const p = ex ? ex.progression : { enabled: true, triggerReps: 7 };
   const ds = ex ? (ex.defaultSets ?? 3) : 3;
   openModal(`
     <h2>${ex ? 'Übung bearbeiten' : 'Neue Übung'}</h2>
@@ -610,19 +628,13 @@ function exerciseEditor(exId) {
           <label class="switch"><input type="checkbox" name="usesBands" ${ex && ex.usesBands ? 'checked' : ''}><span class="slider"></span></label>
         </div>
         <div class="switch-row">
-          <div><div class="sw-label">Auto-Progression</div><div class="sw-sub">Gewicht automatisch vorschlagen</div></div>
+          <div><div class="sw-label">Hinweis bei Ziel-Wiederholungen</div><div class="sw-sub">Zeigt nur eine Meldung – ändert das Gewicht nicht automatisch</div></div>
           <label class="switch"><input type="checkbox" name="progEnabled" ${p.enabled ? 'checked' : ''}><span class="slider"></span></label>
         </div>
       </div>
-      <div class="btn-row">
-        <div class="field" style="flex:1">
-          <label>Ab X Wiederholungen</label>
-          <input class="input" type="number" inputmode="numeric" name="triggerReps" min="1" value="${p.triggerReps}">
-        </div>
-        <div class="field" style="flex:1">
-          <label>Steigerung (kg)</label>
-          <input class="input" type="number" inputmode="decimal" step="0.5" name="stepKg" min="0" value="${p.stepKg}">
-        </div>
+      <div class="field">
+        <label>Ab X Wiederholungen</label>
+        <input class="input" type="number" inputmode="numeric" name="triggerReps" min="1" value="${p.triggerReps}">
       </div>
       <button type="submit" class="btn btn-primary mt">${ex ? 'Speichern' : 'Übung anlegen'}</button>
       ${ex ? `<button type="button" class="btn btn-danger mt" data-action="delete-exercise" data-id="${ex.id}">Übung löschen</button>` : ''}
@@ -642,8 +654,7 @@ function saveExerciseFromForm(exId) {
     usesBands: f.usesBands.checked,
     progression: {
       enabled: f.progEnabled.checked,
-      triggerReps: Math.max(1, Math.round(num(f.triggerReps.value) || 7)),
-      stepKg: Math.max(0, num(f.stepKg.value) || 1)
+      triggerReps: Math.max(1, Math.round(num(f.triggerReps.value) || 7))
     }
   };
   if (exId) {
@@ -763,19 +774,17 @@ function openSettings() {
 }
 
 /* ============================================================
-   Audio-Session: eigenes Signal soll Musik/Podcasts nicht dauerhaft
-   stoppen, sondern nach dem Piepton automatisch weiterlaufen lassen.
-   Unterstützt seit iOS/Safari 16.4 (navigator.audioSession); auf
-   älteren Versionen no-op (Browser-Standardverhalten greift dann).
+   Audio-Session: läuft während der Pause im "ambient"-Modus, damit
+   laufende Musik/Podcasts NICHT unterbrochen werden (nur lautloses
+   Mischen). Erst direkt beim eigentlichen Piepton wird kurz auf
+   "transient-solo" umgeschaltet – Musik pausiert nur für den kurzen
+   Ton und läuft danach automatisch weiter (wie bei einer Navigations-
+   ansage). Unterstützt seit iOS/Safari 16.4 (navigator.audioSession);
+   auf älteren Versionen no-op (Browser-Standardverhalten greift dann).
    ============================================================ */
-function configureAudioSession() {
+function configureAudioSession(type) {
   try {
-    if ('audioSession' in navigator) {
-      // "transient-solo": andere Wiedergabe (z. B. Musik-App) wird für den
-      // kurzen Piepton unterbrochen und läuft danach automatisch weiter –
-      // wie bei einer Navigationsansage oder einem Wecker.
-      navigator.audioSession.type = 'transient-solo';
-    }
+    if ('audioSession' in navigator) navigator.audioSession.type = type;
   } catch (e) { /* Feature nicht verfügbar – ignorieren */ }
 }
 
@@ -819,6 +828,7 @@ const restTimer = {
     this.iv = setInterval(() => this.tick(), 250);
   },
   startKeepAlive() {
+    configureAudioSession('ambient'); // mischt lautlos mit laufender Musik, unterbricht sie nicht
     const k = $('#keepalive');
     if (!k) return;
     k.loop = true;
@@ -853,6 +863,7 @@ const restTimer = {
     this.stop();
   },
   beep() {
+    configureAudioSession('transient-solo'); // Musik pausiert nur kurz und läuft danach automatisch weiter
     const a = $('#beep');
     if (!a) return;
     try { a.currentTime = 0; a.play().catch(() => {}); } catch (e) {}
@@ -921,10 +932,10 @@ document.addEventListener('click', (e) => {
 
   switch (action) {
     case 'start-session':
-      newActiveSession(); render(); break;
+      newActiveSession(); render({ resetScroll: true }); break;
 
     case 'discard-session':
-      if (confirm('Aktuelles Training verwerfen?')) { store.db.active = null; store.save(); render(); }
+      if (confirm('Aktuelles Training verwerfen?')) { store.db.active = null; store.save(); render({ resetScroll: true }); }
       break;
 
     case 'finish-session': {
@@ -933,6 +944,9 @@ document.addEventListener('click', (e) => {
       a.entries.forEach((en) => { en.sets = en.sets.filter((s) => num(s.reps) > 0); delete en._sug; });
       a.entries = a.entries.filter((en) => en.sets.length > 0);
       if (!a.entries.length) { toast('Keine gültigen Sätze eingetragen'); break; }
+      // Datum des Abschlusses zählt, nicht des Starts (z. B. bei Training über Mitternacht
+      // oder wenn erst am Folgetag auf "Training abschließen" getippt wird).
+      a.dateISO = todayISO();
       store.db.sessions.push(a);
       store.db.active = null;
       store.save();
@@ -1227,7 +1241,7 @@ function applyTheme() {
 function init() {
   store.load();
   applyTheme();
-  configureAudioSession();
+  configureAudioSession('ambient');
   render();
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
