@@ -174,9 +174,11 @@ function suggestWeight(exId) {
     const base = num(first.weight);
     const prog = ex.progression || {};
     const reached = !!prog.enabled && num(first.reps) >= num(prog.triggerReps);
-    return { weight: base, reached, prevReps: num(first.reps) };
+    // Band-Stärke wird genau wie das Gewicht aus dem letzten Training übernommen,
+    // damit sie nicht bei jedem neuen Training erneut eingegeben werden muss.
+    return { weight: base, band: first.band ?? '', reached, prevReps: num(first.reps) };
   }
-  return { weight: 0, reached: false, prevReps: 0 };
+  return { weight: 0, band: '', reached: false, prevReps: 0 };
 }
 
 /* ============================================================
@@ -203,22 +205,52 @@ let lastRenderedTab = null;
 // im selben Tab (z. B. Satz abhaken, Übung auf-/zuklappen, Reihenfolge ändern),
 // bleibt die aktuelle Scroll-Position erhalten statt nach jedem Tap nach oben
 // zu springen.
+//
+// WICHTIG: Der eigentliche Scroll-Container ist das Dokument selbst (#view hat
+// kein eigenes overflow), daher wird window/document.documentElement gelesen
+// und geschrieben – nicht view.scrollTop (das wäre wirkungslos).
+//
+// Zusätzlich: iOS Safari verschiebt den sichtbaren Bereich nachträglich, wenn
+// nach dem Rendern die virtuelle Tastatur zuklappt (z. B. Wiederholungen
+// eintippen, dann Häkchen antippen). Das wird NICHT über blinde Zeitverzögerungen
+// abgefangen (die würden ein bewusstes Weiterscrollen des Nutzers kurz danach
+// wieder zunichtemachen), sondern präzise über das visualViewport "resize"-
+// Ereignis, das genau dann feuert, wenn sich die sichtbare Höhe durch das
+// Ein-/Ausblenden der Tastatur ändert – nicht bei normalem Scrollen.
+function currentScrollY() {
+  return window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+}
+
+let pendingScrollFix = null; // { y, expiresAt }
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => {
+    if (pendingScrollFix && Date.now() < pendingScrollFix.expiresAt) {
+      window.scrollTo(0, pendingScrollFix.y);
+    }
+  });
+}
+
 function render(opts) {
   $('#header-title').textContent = TAB_TITLES[ui.tab];
   document.querySelectorAll('.tab').forEach((t) =>
     t.classList.toggle('active', t.dataset.tab === ui.tab));
   const view = $('#view');
   const tabChanged = ui.tab !== lastRenderedTab || (opts && opts.resetScroll);
-  const prevScroll = tabChanged ? 0 : view.scrollTop;
+  const prevY = tabChanged ? 0 : currentScrollY();
   if (ui.tab === 'training') view.innerHTML = viewTraining();
   else if (ui.tab === 'history') view.innerHTML = viewHistory();
   else if (ui.tab === 'progress') view.innerHTML = viewProgress();
   else if (ui.tab === 'exercises') view.innerHTML = viewExercises();
   if (tabChanged) {
-    view.scrollTop = 0;
-    document.documentElement.scrollTop = 0;
+    window.scrollTo(0, 0);
+    pendingScrollFix = null;
   } else {
-    view.scrollTop = prevScroll;
+    window.scrollTo(0, prevY);
+    requestAnimationFrame(() => window.scrollTo(0, prevY));
+    // Kurzes Zeitfenster, in dem ein durch Tastatur-Schließen ausgelöstes
+    // visualViewport-resize noch korrigiert wird – danach nicht mehr, damit
+    // ein bewusstes späteres Scrollen des Nutzers unangetastet bleibt.
+    pendingScrollFix = { y: prevY, expiresAt: Date.now() + 500 };
   }
   lastRenderedTab = ui.tab;
 }
@@ -272,9 +304,12 @@ function exerciseBlock(entry, ei) {
   const sug = entry._sug; // an Eintrag gehängt beim Hinzufügen
   // Reine Information, keine automatische Gewichtsänderung: eine pauschale Zahl ist
   // z. B. bei Widerstandsbändern nicht immer möglich – die Entscheidung bleibt beim Nutzer.
-  const hint = sug && sug.reached
-    ? `<div class="ex-hint up">💪 Letztes Mal ${sug.prevReps} WH im 1. Satz erreicht — die Übung darf gern schwerer werden</div>`
-    : (sug && sug.prevReps ? `<div class="ex-hint">Letztes Mal ${sug.prevReps} WH im 1. Satz</div>` : '');
+  // Wichtig: auch in der EINGEKLAPPTEN Übersicht sichtbar (nicht nur im aufgeklappten
+  // Detail), damit der Hinweis nicht übersehen wird.
+  const reachedHint = sug && sug.reached
+    ? `<div class="ex-hint up">💪 ${sug.prevReps} Wiederholungen mit diesem Gewicht bereits erreicht — die Übung darf gern schwerer werden</div>`
+    : '';
+  const historyHint = (sug && !sug.reached && sug.prevReps) ? `<div class="ex-hint">Letztes Mal ${sug.prevReps} WH im 1. Satz</div>` : '';
 
   const pr = prsForExercise(ex.id);
   const entryWeight = entry.sets.length ? (entry.sets[0].weight ?? '') : '';
@@ -315,7 +350,7 @@ function exerciseBlock(entry, ei) {
 
   const detail = expanded ? `
     <div class="ex-detail">
-      ${hint}
+      ${historyHint}
       <div class="ex-weight-bar">
         <span class="ewb-label">Gewicht (alle Sätze)</span>
         <div class="ewb-input">
@@ -342,10 +377,12 @@ function exerciseBlock(entry, ei) {
           <div class="ex-sum-main">
             <div class="ex-name">${esc(ex.name)}${allDone ? ' <span class="ex-done-badge">✓</span>' : ''}</div>
             <div class="ex-sum-sub">${weightLabel}${bandLabel}${total ? ` · <span class="${allDone ? 'sub-done' : ''}">${doneCount}/${total} Sätze</span>` : ''}</div>
+            ${reachedHint}
           </div>
           <svg class="ex-chevron" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
         </div>
-        <button class="drag-handle" data-drag data-ei="${ei}" aria-label="Zum Verschieben gedrückt halten und ziehen">
+        <button class="drag-handle" data-drag data-ei="${ei}" aria-label="2 Sekunden gedrückt halten, um die Reihenfolge zu ändern">
+          <span class="dh-fill"></span>
           <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>
         </button>
       </div>
@@ -789,56 +826,41 @@ function configureAudioSession(type) {
 }
 
 /* ============================================================
-   Rest-Timer – zeitstempelbasiert (übersteht Sperrbildschirm/
-   Hintergrund korrekt) mit iOS-taugliches Beep-Pattern.
+   Rest-Timer – zeitstempelbasiert mit iOS-taugliches Beep-Pattern.
 
-   Statt Sekunden per setInterval herunterzuzählen (was beim Sperren
-   des Bildschirms pausiert/driftet), merken wir uns den realen
-   Ziel-Zeitpunkt (endAt) und berechnen die Restzeit immer aus der
-   tatsächlich vergangenen Zeit. Eine leise Endlos-Audiospur hält die
-   Wiedergabe-Session aktiv, damit iOS die Seite bei gesperrtem
-   Bildschirm nicht sofort komplett pausiert (das Muster, mit dem auch
-   Musik-/Podcast-Web-Player im Hintergrund weiterlaufen). Zusätzlich
-   wird beim Zurückkehren in die App (visibilitychange/pageshow) sofort
-   nachgerechnet, damit die Anzeige nie falsch stehen bleibt und ein
-   verpasster Ablauf sofort nachgeholt wird (Piepton + Hinweis).
+   Statt Sekunden per setInterval herunterzuzählen (was beim Sperren des
+   Bildschirms driften kann), merken wir uns den realen Ziel-Zeitpunkt
+   (endAt) und berechnen die Restzeit immer aus der tatsächlich
+   vergangenen Zeit. Beim Zurückkehren in die App (visibilitychange/
+   pageshow/focus) wird sofort nachgerechnet, damit die Anzeige nie
+   falsch stehen bleibt und ein verpasster Ablauf sofort nachgeholt wird.
+
+   WICHTIG: Während der Pause läuft KEINE Audiospur mit – bewusst so
+   gewählt, damit Musik/Podcasts (z. B. Spotify) während der gesamten
+   Pausendauer ununterbrochen weiterlaufen. Nur der kurze Piepton am
+   Ende spielt (siehe beep()), mit "transient-solo": andere Wiedergabe
+   pausiert nur für diesen kurzen Moment und läuft danach automatisch
+   von selbst weiter.
    ============================================================ */
 const restTimer = {
   endAt: 0, iv: null, audioReady: false,
   unlock() {
     if (this.audioReady) return;
     const a = $('#beep');
-    const k = $('#keepalive');
-    if (!a || !k) return;
-    a.muted = true; k.muted = true;
-    Promise.all([
-      a.play().then(() => { a.pause(); a.currentTime = 0; }).catch(() => {}),
-      k.play().then(() => { k.pause(); k.currentTime = 0; }).catch(() => {})
-    ]).then(() => { a.muted = false; k.muted = false; this.audioReady = true; });
+    if (!a) return;
+    a.muted = true;
+    a.play().then(() => { a.pause(); a.currentTime = 0; a.muted = false; this.audioReady = true; }).catch(() => {});
   },
   start(seconds) {
     this.stop();
+    configureAudioSession('ambient'); // Grundzustand: mischt sich mit laufender Musik, unterbricht nichts
     this.endAt = Date.now() + seconds * 1000;
     const el = $('#rest-timer');
     el.classList.remove('hidden');
     this.tickUI();
-    this.startKeepAlive();
     // Häufiger als 1×/Sek. prüfen, damit wir nach einer kurzen Drosselung
     // (z. B. Tab kurz im Hintergrund) schneller wieder aufholen.
     this.iv = setInterval(() => this.tick(), 250);
-  },
-  startKeepAlive() {
-    configureAudioSession('ambient'); // mischt lautlos mit laufender Musik, unterbricht sie nicht
-    const k = $('#keepalive');
-    if (!k) return;
-    k.loop = true;
-    k.play().catch(() => {});
-  },
-  stopKeepAlive() {
-    const k = $('#keepalive');
-    if (!k) return;
-    k.pause();
-    try { k.currentTime = 0; } catch (e) {}
   },
   tick() {
     if (!this.endAt) return;
@@ -872,7 +894,6 @@ const restTimer = {
     if (this.iv) clearInterval(this.iv);
     this.iv = null;
     this.endAt = 0;
-    this.stopKeepAlive();
     const el = $('#rest-timer');
     if (el) { el.classList.add('hidden'); el.classList.remove('ending'); }
   }
@@ -897,7 +918,7 @@ function buildEntry(exId) {
   const entry = { exerciseId: exId, sets: [], _sug: sug };
   const nSets = Math.max(1, (ex.defaultSets ?? 3));
   for (let k = 0; k < nSets; k++) {
-    entry.sets.push({ reps: '', weight: sug.weight || '', band: '', done: false });
+    entry.sets.push({ reps: '', weight: sug.weight || '', band: sug.band || '', done: false });
   }
   return entry;
 }
@@ -1080,29 +1101,75 @@ $('#tabbar').addEventListener('click', (e) => {
 $('#settings-btn').addEventListener('click', () => { restTimer.unlock(); openSettings(); });
 
 /* ============================================================
-   Drag & Drop: Übungen im Training per Griff verschieben
+   Drag & Drop: Übungen im Training per Griff verschieben.
+
+   Damit ein Scroll-Wisch, der zufällig über dem schmalen Griff beginnt,
+   nicht versehentlich die Reihenfolge verändert, muss der Griff erst
+   DRAG_HOLD_MS lang ohne nennenswerte Bewegung gehalten werden, bevor
+   das Verschieben aktiviert wird ("long press", wie beim Sortieren von
+   Home-Bildschirm-Icons). Bewegt sich der Finger währenddessen mehr als
+   DRAG_MOVE_CANCEL_PX, wird das als normales Scrollen gewertet und der
+   Griff bleibt inaktiv – der Griff hat dafür bewusst KEIN touch-action:
+   none, damit er sich bis zum Aktivieren wie normaler Seiteninhalt
+   verhält und nicht von vornherein jedes Scrollen blockiert.
    ============================================================ */
+const DRAG_HOLD_MS = 2000;
+const DRAG_MOVE_CANCEL_PX = 10;
 let dnd = null;
+let pendingHold = null;
+
+function cancelPendingHold() {
+  if (pendingHold) {
+    clearTimeout(pendingHold.timer);
+    pendingHold.handle.classList.remove('charging');
+    pendingHold = null;
+  }
+}
 
 document.addEventListener('pointerdown', (e) => {
   const handle = e.target.closest('[data-drag]');
   if (!handle || !store.db.active) return;
+  cancelPendingHold();
+  handle.classList.add('charging');
+  const hold = {
+    pointerId: e.pointerId, handle,
+    startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY,
+    timer: null
+  };
+  hold.timer = setTimeout(() => armDrag(hold), DRAG_HOLD_MS);
+  pendingHold = hold;
+});
+
+function armDrag(hold) {
+  if (pendingHold !== hold) return; // zwischenzeitlich abgebrochen/ersetzt
+  pendingHold = null;
+  const { handle, lastX, lastY } = hold;
+  handle.classList.remove('charging');
   const block = handle.closest('.ex-block');
   const container = block.parentElement;
   const items = [...container.querySelectorAll('.ex-block')];
   const index = items.indexOf(block);
   if (index < 0) return;
-  e.preventDefault();
   const rects = items.map((el) => el.getBoundingClientRect());
   dnd = {
-    pointerId: e.pointerId, block, container, items, rects, index,
-    startY: e.clientY, unit: rects[index].height + 14, targetK: index, moved: false
+    pointerId: hold.pointerId, handle, block, container, items, rects, index,
+    startY: lastY, unit: rects[index].height + 14, targetK: index, moved: false
   };
-  try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+  handle.classList.add('armed');
+  handle.style.touchAction = 'none';
+  if (navigator.vibrate) navigator.vibrate(15); // no-op auf iOS, wirkt auf Android
+  try { handle.setPointerCapture(hold.pointerId); } catch (_) {}
   block.classList.add('dragging');
-});
+}
 
 document.addEventListener('pointermove', (e) => {
+  // Warte-Phase: deutliche Bewegung vor Ablauf der Haltezeit = Scroll-Absicht -> abbrechen.
+  if (pendingHold && pendingHold.pointerId === e.pointerId) {
+    pendingHold.lastX = e.clientX; pendingHold.lastY = e.clientY;
+    const dx = e.clientX - pendingHold.startX, dy = e.clientY - pendingHold.startY;
+    if (Math.hypot(dx, dy) > DRAG_MOVE_CANCEL_PX) cancelPendingHold();
+    return;
+  }
   if (!dnd || e.pointerId !== dnd.pointerId) return;
   e.preventDefault();
   dnd.moved = true;
@@ -1129,9 +1196,12 @@ document.addEventListener('pointermove', (e) => {
 });
 
 function endDrag(e) {
+  cancelPendingHold();
   if (!dnd || e.pointerId !== dnd.pointerId) return;
-  const { index, targetK, moved } = dnd;
+  const { index, targetK, moved, handle } = dnd;
   dnd.block.classList.remove('dragging');
+  handle.classList.remove('armed');
+  handle.style.touchAction = '';
   dnd = null;
   if (moved && targetK !== index) {
     const arr = store.db.active.entries;
