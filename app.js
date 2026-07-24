@@ -285,15 +285,15 @@ function viewTraining() {
   return `
     <div class="row-between" style="margin-bottom:12px">
       <div>
-        <div style="font-weight:800;font-size:18px">Aktuelles Training</div>
+        <div style="font-weight:800;font-size:18px">${a._editing ? 'Training bearbeiten' : 'Aktuelles Training'}</div>
         <div class="muted small">${esc(fmtDateLong(a.dateISO))}</div>
       </div>
-      <button class="btn btn-sm btn-ghost" data-action="discard-session">Verwerfen</button>
+      <button class="btn btn-sm btn-ghost" data-action="discard-session">${a._editing ? 'Abbrechen' : 'Verwerfen'}</button>
     </div>
     ${blocks}
     <button class="fab-add" data-action="add-exercise">＋ Übung hinzufügen</button>
     <div class="sticky-actions">
-      <button class="btn btn-success" data-action="finish-session">Training abschließen</button>
+      <button class="btn btn-success" data-action="finish-session">${a._editing ? 'Änderungen speichern' : 'Training abschließen'}</button>
     </div>
   `;
 }
@@ -769,8 +769,35 @@ function openSessionDetail(id) {
   openModal(`
     <h2>${esc(fmtDateLong(s.dateISO))}</h2>
     ${blocks || '<p class="muted">Keine Übungen.</p>'}
-    <button class="btn btn-danger mt" data-action="delete-session" data-id="${s.id}">Training löschen</button>
+    <div class="btn-row mt">
+      <button class="btn btn-ghost" data-action="edit-session" data-id="${s.id}">Bearbeiten</button>
+      <button class="btn btn-danger" data-action="delete-session" data-id="${s.id}">Löschen</button>
+    </div>
   `);
+}
+
+// Öffnet ein bereits abgeschlossenes Training erneut zum Bearbeiten/Fortführen:
+// Sätze/Übungen ändern, weitere Übungen hinzufügen, Reihenfolge anpassen. Beim
+// erneuten Abschließen wird das URSPRÜNGLICHE Datum beibehalten (nicht auf
+// heute gesetzt). Eine unveränderte Sicherung wird mitgeführt, damit "Abbrechen"
+// die Original-Daten verlustfrei wiederherstellen kann.
+function openSessionForEdit(id) {
+  if (store.db.active) {
+    toast('Bitte zuerst das laufende Training abschließen oder verwerfen');
+    return;
+  }
+  const idx = store.db.sessions.findIndex((x) => x.id === id);
+  if (idx < 0) return;
+  const session = store.db.sessions[idx];
+  const original = JSON.parse(JSON.stringify(session));
+  store.db.sessions.splice(idx, 1);
+  session._editing = true;
+  session._original = original;
+  store.db.active = session;
+  store.save();
+  closeModal();
+  ui.tab = 'training';
+  render({ resetScroll: true });
 }
 
 function openSettings() {
@@ -811,13 +838,20 @@ function openSettings() {
 }
 
 /* ============================================================
-   Audio-Session: läuft während der Pause im "ambient"-Modus, damit
-   laufende Musik/Podcasts NICHT unterbrochen werden (nur lautloses
-   Mischen). Erst direkt beim eigentlichen Piepton wird kurz auf
-   "transient-solo" umgeschaltet – Musik pausiert nur für den kurzen
-   Ton und läuft danach automatisch weiter (wie bei einer Navigations-
-   ansage). Unterstützt seit iOS/Safari 16.4 (navigator.audioSession);
-   auf älteren Versionen no-op (Browser-Standardverhalten greift dann).
+   Audio-Session: durchgehend "ambient" – der Piepton mischt sich kurz
+   über laufende Musik/Podcasts, OHNE sie zu pausieren.
+
+   Vorherige Version schaltete beim Piepton kurz auf "transient-solo"
+   (soll andere Wiedergabe kurz pausieren und danach automatisch
+   fortsetzen). In der Praxis hat das auf iOS nicht zuverlässig
+   funktioniert: die Musik wurde pausiert, aber kein Ton war zu hören
+   UND die Musik lief danach nicht mehr von selbst weiter – vermutlich,
+   weil das eigentliche Abspielen des Pieptons durch den gleichzeitigen
+   Session-Wechsel fehlschlug und iOS die Unterbrechung dadurch nie als
+   beendet erkannte. "ambient" vermeidet das Problem komplett, indem gar
+   keine Unterbrechung angefordert wird – die Musik läuft garantiert
+   durch. Unterstützt seit iOS/Safari 16.4 (navigator.audioSession); auf
+   älteren Versionen no-op (Browser-Standardverhalten greift dann).
    ============================================================ */
 function configureAudioSession(type) {
   try {
@@ -837,10 +871,9 @@ function configureAudioSession(type) {
 
    WICHTIG: Während der Pause läuft KEINE Audiospur mit – bewusst so
    gewählt, damit Musik/Podcasts (z. B. Spotify) während der gesamten
-   Pausendauer ununterbrochen weiterlaufen. Nur der kurze Piepton am
-   Ende spielt (siehe beep()), mit "transient-solo": andere Wiedergabe
-   pausiert nur für diesen kurzen Moment und läuft danach automatisch
-   von selbst weiter.
+   Pausendauer ununterbrochen weiterlaufen. Der kurze Piepton am Ende
+   (siehe beep()) mischt sich nur kurz darüber, ohne die Musik zu
+   pausieren.
    ============================================================ */
 const restTimer = {
   endAt: 0, iv: null, audioReady: false,
@@ -885,7 +918,7 @@ const restTimer = {
     this.stop();
   },
   beep() {
-    configureAudioSession('transient-solo'); // Musik pausiert nur kurz und läuft danach automatisch weiter
+    configureAudioSession('ambient'); // mischt sich über laufende Musik, pausiert sie nicht
     const a = $('#beep');
     if (!a) return;
     try { a.currentTime = 0; a.play().catch(() => {}); } catch (e) {}
@@ -955,9 +988,22 @@ document.addEventListener('click', (e) => {
     case 'start-session':
       newActiveSession(); render({ resetScroll: true }); break;
 
-    case 'discard-session':
-      if (confirm('Aktuelles Training verwerfen?')) { store.db.active = null; store.save(); render({ resetScroll: true }); }
+    case 'discard-session': {
+      if (!a) break;
+      const isEditing = !!a._editing;
+      const msg = isEditing
+        ? 'Änderungen verwerfen? Das ursprüngliche Training bleibt unverändert erhalten.'
+        : 'Aktuelles Training verwerfen?';
+      if (confirm(msg)) {
+        if (isEditing && a._original) {
+          store.db.sessions.push(a._original); // unveränderte Fassung zurücklegen, keine Änderungen übernehmen
+        }
+        store.db.active = null;
+        store.save();
+        render({ resetScroll: true });
+      }
       break;
+    }
 
     case 'finish-session': {
       if (!a) break;
@@ -965,15 +1011,21 @@ document.addEventListener('click', (e) => {
       a.entries.forEach((en) => { en.sets = en.sets.filter((s) => num(s.reps) > 0); delete en._sug; });
       a.entries = a.entries.filter((en) => en.sets.length > 0);
       if (!a.entries.length) { toast('Keine gültigen Sätze eingetragen'); break; }
-      // Datum des Abschlusses zählt, nicht des Starts (z. B. bei Training über Mitternacht
-      // oder wenn erst am Folgetag auf "Training abschließen" getippt wird).
-      a.dateISO = todayISO();
+      const wasEditing = !!a._editing;
+      if (!wasEditing) {
+        // Datum des Abschlusses zählt, nicht des Starts (z. B. bei Training über Mitternacht
+        // oder wenn erst am Folgetag auf "Training abschließen" getippt wird). Bei einem
+        // nachträglich bearbeiteten Training bleibt dagegen das ursprüngliche Datum erhalten.
+        a.dateISO = todayISO();
+      }
+      delete a._editing;
+      delete a._original;
       store.db.sessions.push(a);
       store.db.active = null;
       store.save();
-      toast('Training gespeichert 💪');
+      toast(wasEditing ? 'Änderungen gespeichert 💪' : 'Training gespeichert 💪');
       ui.tab = 'history';
-      render();
+      render({ resetScroll: true });
       break;
     }
 
@@ -1047,6 +1099,9 @@ document.addEventListener('click', (e) => {
 
     case 'open-session':
       openSessionDetail(t.dataset.id); break;
+
+    case 'edit-session':
+      openSessionForEdit(t.dataset.id); break;
 
     case 'open-day':
       openDay(t.dataset.date); break;
